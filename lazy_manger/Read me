@@ -1,0 +1,101 @@
+Life time Aware Malloc is a hybrid dynamic memory allocator that reduces fragmentation
+by classifying the allocations based on their expected lifetimes.
+
+
+Allocator classifies the requests into 3 types based on thier life span:
+
+1. Short-lived allocations : 
+Short-lived objects usually die together or soon after each other.
+Example:
+i.   Buffers in parsing a file line
+ii.  Temporary arrays in a function
+iii. Scratch space during computation
+Instead of calling free() for each tiny object, you can throw away the entire arena at once when you’re done with that phase.
+
+So we place them in fast bump-pointer arenas for bulk freeing.
+2. Medium-lived allocations 
+These are allocations that live longer than a single function/phase, but not forever.
+Examples:
+i. A buffer that persists for the duration of a request in a server.
+ii. A data structure used across multiple function calls but freed before the program exits.
+They don’t all die together like short-lived objects, so bulk free isn’t safe.
+They aren’t permanent like long-lived objects, so arena dedication is wasteful.
+handled like conventional malloc/free.
+
+Long-lived allocations → placed in page-granularity regions to reduce fragmentation.
+These are objects that:
+Stay alive for most of the program’s runtime. Rarely (if ever) get freed.
+Examples:
+i.   Global caches
+ii.  Database buffers
+iii. Large arrays used throughout the program
+iv.  Config/state structures
+If we put them in the same pool as short/medium objects, they would “pin” memory and cause fragmentation around them.
+
+The function can specify the life of the request that will reduce the overhead.
+If function dont specify the life, we use predictor to predict the life of the request
+
+Allocator classifies the requests into 3 types based on thier size:
+
+1. Small sized bins: If the requested size is less than 1 KB.
+2. Mid sized bins: If the requested size is in between 1 KB → 64 KB.
+3. Large sized bins: If the requested size is greater than 64 KB.
+
+So we have 9 cases:
+
+1. If the request is small sized and short lived
+2. If the request is small sized and medium lived
+3. If the request is small sized and long lived
+4. If the request is medium sized and short lived
+5. If the request is medium sized and medium lived
+6. If the request is medium sized and long lived
+7. If the request is large sized and short lived
+8. If the request is large sized and medium lived
+9. If the request is large sized and long lived
+
+-----------------------------------------------------------------------------------------------------
+| Case | Size   | Lifetime | Strategy                                                               |
+| ---- | ------ | -------- | ---------------------------------------------------------------------- |
+| 1    | Small  | Short    | Bump-pointer arena for small chunks (fast alloc/free in bulk).         |
+| 2    | Small  | Medium   | Small-bin free-lists             (like dlmalloc/tcmalloc).             |
+| 3    | Small  | Long     | Dedicated small page(s)  (prevents fragmenting short-lived arenas).    |
+| 4    | Medium | Short    | Per-request bump arena           (bulk free after task ends).          |
+| 5    | Medium | Medium   | Segregated bins + coalescing     (traditional malloc/free).            |
+| 6    | Medium | Long     | Page-aligned mmap region         (one or more pages reserved).         |
+| 7    | Large  | Short    | mmap region but tagged short-lived → `munmap` after bulk free.         |
+| 8    | Large  | Medium   | Direct mmap + track individually (munmap on free).                     |
+| 9    | Large  | Long     | Dedicated mmap page(s), never freed until program exit.                |
+-----------------------------------------------------------------------------------------------------
+
+
+CASE 1: If the request is small sized and short lived :
+-------------------------------------------------------
+* We design this part as a stack, We add the new short lived requests if their size is less than 1 KB to the stack. We keep record of the objects pushed into the stack.
+* We dont remove single elements from the stack, instead we remove entire stack (bulk free). 
+* We call this type of allocator as bump allocator. And the stack we maintain is called as arena
+
+* Small objects are frequent, so we want very fast allocation.
+* Short-lived means we don’t need to free individually.
+* Bump arena = the fastest possible allocator: just a pointer increment.
+
+CASE 2: If the request is medium sized and short lived :
+--------------------------------------------------------
+* We design this part as a bins - bucket of same sized blocks (2KB,4KB,8KB,16KB,32KB). We store them as linked list.
+* Whenever we get request from a program, we round the request to nearest available block and pop the un used block and return to the program. We call this as free-lists
+* When free(ptr) is called then we return back the block to respective bin.
+* Allocations are small (fit into fixed bins).
+* They are medium-lived (freed individually in random order).
+* We can’t bulk free like arenas.
+* Free-lists allow O(1) reuse of freed blocks.
+
+CASE 3: If the request is large sized and short lived :
+-------------------------------------------------------
+* We allocate entire pages to the request
+* Most of the systems uses 4KB as standard page size. So we round up to nearest pages. And we provide that many pages.
+* Isolation: Long-lived allocations won’t fragment small-bins.
+* Less fragmentation: You avoid having “holes” in small bins when short-lived objects die.
+* Direct OS mapping: For very large requests (like 1 MB), it’s more efficient to just mmap directly.
+
+
+
+

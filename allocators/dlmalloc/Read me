@@ -1,0 +1,41 @@
+Why do we use size_t instead of int?
+
+void *malloc(size_t size) – Why size_t?
+1. Represents Size and Memory Offsets Naturally
+size_t is an unsigned integer type used to represent the size of objects in bytes.
+It's the type returned by the sizeof operator — so it makes sense to use it when you're allocating memory based on the size of a type or object.
+
+Example:
+malloc(sizeof(int) * 100); // sizeof returns size_t
+Using int would mismatch types here.
+
+2. Platform Independence
+On 32-bit systems, size_t is typically unsigned int (4 bytes).
+On 64-bit systems, it's typically unsigned long or unsigned long long (8 bytes).
+This ensures that malloc() can request up to 4 GB on 32-bit or huge amounts (exabytes) on 64-bit systems, depending on address space.
+If int (usually signed 32-bit) were used, you’d be limited to:
+Maximum size: INT_MAX ≈ 2.1 GB (not even full 4 GB)
+Negative numbers: meaningless for allocation
+
+ 3. Avoids Signed Integer Pitfalls
+int can hold negative values. What would malloc(-10) mean? Undefined.
+size_t being unsigned ensures only valid positive sizes can be passed.
+
+ 4. Standard and Safe
+size_t is the standard type for memory sizes in C and C++.
+Functions like malloc, memcpy, realloc, and strlen use size_t.
+This ensures type compatibility and prevents truncation or overflow bugs when values cross type boundaries.
+
+❌ Why not int?
+
+Signedness	Negative memory sizes are invalid.
+Limited Range	int might restrict you to 2GB, even on systems with much more memory.
+Mismatch with sizeof	sizeof returns size_t, not int.
+
+✅ Summary
+We use size_t in malloc(size_t size) because:
+It's the correct type for expressing object sizes.
+It avoids negative/invalid values.
+It's portable and consistent across systems.
+It aligns with other standard functions and operators.
+
